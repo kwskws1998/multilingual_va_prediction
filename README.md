@@ -333,6 +333,9 @@ python train_model.py xlmroberta-base mse+ccc \
 - `--features-used`: feature flags in `nFix,FFD,GPT,TRT,fixProp` order.
 - `--fp-dropout`: dropout values for the ET feature projector.
 - with `--use-gaze-concat`, keep `--maxlen <= 255` (concat doubles sequence length).
+- checkpoint options:
+  - `--save-total-limit` (default `1`) keeps only recent checkpoints to reduce disk usage.
+  - `--save-strategy no` disables periodic checkpoint saving (useful on low-storage GPUs).
 
 For a full experiment matrix guide (model/loss/features/batch/optimizer combinations),
 see `README_experiments.md`.

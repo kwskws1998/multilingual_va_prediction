@@ -122,6 +122,19 @@ def _build_parser():
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--maxlen", type=int, default=200)
+    parser.add_argument("--save-strategy", choices=["epoch", "no"], default="epoch")
+    parser.add_argument("--save-total-limit", type=int, default=1)
+    parser.add_argument(
+        "--load-best-model-at-end",
+        dest="load_best_model_at_end",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-load-best-model-at-end",
+        dest="load_best_model_at_end",
+        action="store_false",
+    )
+    parser.set_defaults(load_best_model_at_end=True)
     parser.add_argument("--data-dir", default="data/emobank")
     return parser
 
@@ -137,6 +150,7 @@ def main():
         _validate_positive_int("train_epochs", args.train_epochs)
         _validate_positive_int("gradient_accumulation_steps", args.gradient_accumulation_steps)
         _validate_positive_int("maxlen", args.maxlen)
+        _validate_positive_int("save_total_limit", args.save_total_limit)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -144,6 +158,9 @@ def main():
         parser.error(
             "When --use-gaze-concat is enabled, maxlen must be <= 255 to avoid positional limit overflow."
         )
+    if args.save_strategy == "no" and args.load_best_model_at_end:
+        args.load_best_model_at_end = False
+        print("[benchmark_emobank] save_strategy=no, so load_best_model_at_end was set to False.")
 
     checkpoint = MODEL_TO_CHECKPOINT[args.model]
     gaze_config = {
@@ -175,6 +192,9 @@ def main():
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "seed": args.seed,
         "maxlen": args.maxlen,
+        "save_strategy": args.save_strategy,
+        "save_total_limit": args.save_total_limit,
+        "load_best_model_at_end": args.load_best_model_at_end,
     }
 
     model = _build_model(args.model, checkpoint, train_data.tokenizer, gaze_config)

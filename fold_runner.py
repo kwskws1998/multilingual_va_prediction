@@ -54,6 +54,11 @@ def _build_model(model_name, checkpoint, tokenizer, gaze_config):
 
 
 def _build_training_args(output_dir, logging_dir, batch_size, params):
+    save_strategy = params.get("save_strategy", "epoch")
+    load_best_model_at_end = params.get("load_best_model_at_end", True)
+    if save_strategy == "no":
+        load_best_model_at_end = False
+
     return TrainingArguments(
         output_dir=output_dir,
         logging_dir=logging_dir,
@@ -68,8 +73,9 @@ def _build_training_args(output_dir, logging_dir, batch_size, params):
         seed=params.get("seed", 42),
         group_by_length=True,
         evaluation_strategy="epoch",
-        save_strategy="epoch",
-        load_best_model_at_end=True,
+        save_strategy=save_strategy,
+        save_total_limit=params.get("save_total_limit", 1),
+        load_best_model_at_end=load_best_model_at_end,
         warmup_ratio=params["warmup_ratio"],
     )
 
