@@ -10,6 +10,7 @@ setup_et_models.py를 실행하면 자동으로 설정됨.
 """
 
 import os
+import re
 import numpy as np
 import torch
 import transformers
@@ -153,7 +154,7 @@ class FixationsPredictor_2:
 
     def _predict_words(self, text):
         """텍스트를 받아 단어 수준 5-feature 예측 반환"""
-        words = text.strip().split()
+        words = self._segment_text(text)
         if not words:
             return np.zeros((0, 5), dtype=np.float32), words
 
@@ -172,6 +173,31 @@ class FixationsPredictor_2:
         # 각 단어의 첫 번째 서브워드(Ġ) 예측값을 단어 대표값으로 사용
         word_features = self._aggregate_to_words(token_preds, input_ids.squeeze(0))
         return word_features, words
+
+    @staticmethod
+    def _is_cjk(ch):
+        code = ord(ch)
+        return (
+            0x4E00 <= code <= 0x9FFF    # CJK Unified Ideographs
+            or 0x3040 <= code <= 0x30FF # Hiragana + Katakana
+            or 0xAC00 <= code <= 0xD7AF # Hangul Syllables
+        )
+
+    def _segment_text(self, text):
+        text = (text or "").strip()
+        if not text:
+            return []
+
+        if any(ch.isspace() for ch in text):
+            words = text.split()
+            if words:
+                return words
+
+        if any(self._is_cjk(ch) for ch in text):
+            # CJK fallback: whitespace-only split collapses whole sentences into one token.
+            return [ch for ch in text if not ch.isspace()]
+
+        return re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)
 
     def _sliding_window_predict(self, input_ids, attn_mask):
         """512 초과 시퀀스를 슬라이딩 윈도우로 처리 (overlap 50, linear blending)"""
@@ -224,13 +250,15 @@ class FixationsPredictor_2:
                   for i in input_ids_1d]
 
         word_feats = []
+        seen_first_word = False
         for idx, tok in enumerate(tokens):
             if tok in ("<s>", "</s>", "<pad>"):
                 continue
             # Ġ로 시작하면 새 단어의 첫 서브워드
-            if tok.startswith("Ġ"):
+            if tok.startswith("Ġ") or not seen_first_word:
                 pred = np.clip(token_preds[idx], 0, None)
                 word_feats.append(pred)
+                seen_first_word = True
 
         return np.array(word_feats, dtype=np.float32) if word_feats else np.zeros((0, 5), dtype=np.float32)
 

@@ -253,3 +253,24 @@ To fine-tune the model please run the file `train_model.py`.
 It expects two arguments:
 - Model: **distilbert** or **xlmroberta-base** or **xlmroberta-large**
 - Loss function: **mse** or **ccc** or **robust** or **mse+ccc** or **robust+ccc**
+
+### GazeConcat (ET model 2) for VA
+
+You can enable Seeing Eye to AI-style concatenation of ET features with:
+
+```bash
+python train_model.py xlmroberta-base mse+ccc \
+  --use-gaze-concat \
+  --et2-checkpoint ./checkpoints/et_predictor2_seed123 \
+  --features-used 0,1,0,1,0 \
+  --fp-dropout 0.1,0.3
+```
+
+- `--use-gaze-concat`: enables gaze-text concatenation.
+- `--et2-checkpoint`: path to your CMCL-RoBERTa ET2 checkpoint (`.pt` or `.safetensors`).
+- `--features-used`: feature flags in `nFix,FFD,GPT,TRT,fixProp` order.
+- `--fp-dropout`: dropout values for the ET feature projector.
+- with `--use-gaze-concat`, keep `--maxlen <= 255` (concat doubles sequence length).
+
+For a full experiment matrix guide (model/loss/features/batch/optimizer combinations),
+see `README_experiments.md`.

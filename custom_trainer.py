@@ -55,7 +55,6 @@ class CustomTrainerCCC(Trainer):
         logits_a = logits[:,1]
         labels_v = labels[:,0]
         labels_a = labels[:,1]
-        print(logits_v)
         # CCC valence
         num_V = 2*pearsonr(logits_v, labels_v)*torch.std(logits_v)*torch.std(labels_v)
         den_V = torch.var(logits_v) + torch.var(labels_v) + torch.square(torch.mean(logits_v) - torch.mean(labels_v))
@@ -142,87 +141,28 @@ class CustomTrainerMSE_CCC(Trainer):
 class CustomTrainerRobustCCC(Trainer): 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-    
-    
-    ### From robust
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.num_dims = 2 # 1, 2??
+        self.num_dims = 2
+        adaptive_device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.adaptive = robust_loss_pytorch.adaptive.AdaptiveLossFunction(
-            num_dims=self.num_dims, 
-            float_dtype=np.float32, 
-            device=0
+            num_dims=self.num_dims,
+            float_dtype=np.float32,
+            device=adaptive_device,
         )
-        self.params = list(self.model.parameters()) + list(self.adaptive.parameters())
-        # self.optimizer = torch.optim.Adam(self.params, lr=0.000006) # No TrainingArguments tenho lr= 2e-5
-        # Comentei o optimizer acima porque caso contrário estaria a user Adam em vez de AdamW como nos outros casos.
 
-   # from ccc
-    def ccc(gold, pred):
-        gold_mean = torch.mean(gold)
-        pred_mean = torch.mean(pred)
-        covariance = (gold-gold_mean)*(pred-pred_mean)
-        torch.cov
-        
+    def create_optimizer(self):
+        optimizer = super().create_optimizer()
+        adaptive_params = [p for p in self.adaptive.parameters() if p.requires_grad]
+        if adaptive_params:
+            existing_param_ids = {
+                id(param)
+                for group in optimizer.param_groups
+                for param in group["params"]
+            }
+            new_params = [param for param in adaptive_params if id(param) not in existing_param_ids]
+            if new_params:
+                optimizer.add_param_group({"params": new_params, "weight_decay": 0.0})
+        return optimizer
 
-    # From robust
-    def training_step(self, model, inputs):
-        """
-        Perform a training step on a batch of inputs.
-        Subclass and override to inject custom behavior.
-        Args:
-            model (`nn.Module`):
-                The model to train.
-            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
-                The inputs and targets of the model.
-                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
-                argument `labels`. Check your model's documentation for all accepted arguments.
-        Return:
-            `torch.Tensor`: The tensor with training loss on this batch.
-        """
-        model.train()
-        inputs = self._prepare_inputs(inputs)
-
-        self.optimizer.zero_grad() 
-
-
-        # if is_sagemaker_mp_enabled():
-        #     scaler = self.scaler if self.do_grad_scaling else None
-        #     loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps, scaler=scaler)
-        #     return loss_mb.reduce_mean().detach().to(self.args.device)
-
-        with self.autocast_smart_context_manager():
-            loss = self.compute_loss(model, inputs)
-
-        if self.args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
-        if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
-            # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
-            loss = loss / self.args.gradient_accumulation_steps
-
-        if self.do_grad_scaling:
-            self.scaler.scale(loss).backward()
-        # elif self.use_apex:
-        #     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-        #         scaled_loss.backward()
-        elif self.deepspeed:
-            # loss gets scaled under gradient_accumulation_steps in deepspeed
-            loss = self.deepspeed.backward(loss)
-        else:
-            loss.backward()
-
-        # loss.backward()#.detach() # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-        # RuntimeError: Trying to backward through the graph a second time (or directly access saved tensors after they 
-        # have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). 
-        # Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.
-        
-        self.optimizer.step()
-
-        return loss.detach()
-
-    
-    
     # This functions overrides class Trainer's compute_loss function
     def compute_loss(self, model, inputs, return_outputs=False):
         #Common to both
@@ -262,6 +202,8 @@ class CustomTrainerRobustCCC(Trainer):
         ccc_loss = cccl_Total
        
         #%%%%%%%%%%%%%%%%%%%%%%%% Robust Loss %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        if next(self.adaptive.parameters()).device != logits.device:
+            self.adaptive.to(logits.device)
         x = (labels - logits)
         robust_loss_adaptive = torch.mean(self.adaptive.lossfun(x))
         
@@ -278,72 +220,26 @@ class CustomTrainerRobust(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_dims = 2 
+        adaptive_device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.adaptive = robust_loss_pytorch.adaptive.AdaptiveLossFunction(
             num_dims=self.num_dims, 
             float_dtype=np.float32, 
-            device=0
+            device=adaptive_device
         )
-        self.params = list(self.model.parameters()) + list(self.adaptive.parameters())
-        # self.optimizer = torch.optim.Adam(self.params, lr=0.000006) # No TrainingArguments tenho lr= 2e-5
-        # Comentei o optimizer acima porque caso contrário estaria a user Adam em vez de AdamW como nos outros casos.
-
-
-    def training_step(self, model, inputs):
-        """
-        Perform a training step on a batch of inputs.
-        Subclass and override to inject custom behavior.
-        Args:
-            model (`nn.Module`):
-                The model to train.
-            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
-                The inputs and targets of the model.
-                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
-                argument `labels`. Check your model's documentation for all accepted arguments.
-        Return:
-            `torch.Tensor`: The tensor with training loss on this batch.
-        """
-        model.train()
-        inputs = self._prepare_inputs(inputs)
-
-        self.optimizer.zero_grad() 
-
-
-        # if is_sagemaker_mp_enabled():
-        #     scaler = self.scaler if self.do_grad_scaling else None
-        #     loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps, scaler=scaler)
-        #     return loss_mb.reduce_mean().detach().to(self.args.device)
-
-        with self.autocast_smart_context_manager():
-            loss = self.compute_loss(model, inputs)
-
-        if self.args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
-        if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
-            # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
-            loss = loss / self.args.gradient_accumulation_steps
-
-        if self.do_grad_scaling:
-            self.scaler.scale(loss).backward()
-        # elif self.use_apex:
-        #     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-        #         scaled_loss.backward()
-        elif self.deepspeed:
-            # loss gets scaled under gradient_accumulation_steps in deepspeed
-            loss = self.deepspeed.backward(loss)
-        else:
-            loss.backward()
-
-        # loss.backward()#.detach() # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-        # RuntimeError: Trying to backward through the graph a second time (or directly access saved tensors after they 
-        # have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). 
-        # Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.
-        
-        self.optimizer.step()
-
-        return loss.detach()
-
-
+    
+    def create_optimizer(self):
+        optimizer = super().create_optimizer()
+        adaptive_params = [p for p in self.adaptive.parameters() if p.requires_grad]
+        if adaptive_params:
+            existing_param_ids = {
+                id(param)
+                for group in optimizer.param_groups
+                for param in group["params"]
+            }
+            new_params = [param for param in adaptive_params if id(param) not in existing_param_ids]
+            if new_params:
+                optimizer.add_param_group({"params": new_params, "weight_decay": 0.0})
+        return optimizer
 
     # This functions overrides class Trainer's compute_loss function
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -410,6 +306,8 @@ class CustomTrainerRobust(Trainer):
         
         # robust_loss_adaptive = torch.mean(self.adaptive.lossfun((labels.view(-1) - logits.view(-1))[:,None]))
         
+        if next(self.adaptive.parameters()).device != logits.device:
+            self.adaptive.to(logits.device)
         robust_loss_adaptive = torch.mean(self.adaptive.lossfun(x))
 
         # print('momentary_loss(mean): ', robust_loss_adaptive)
@@ -432,6 +330,4 @@ class CustomTrainerRobust(Trainer):
         
         
         return (loss, outputs) if return_outputs else loss
-
-
 

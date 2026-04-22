@@ -8,13 +8,25 @@ import sys
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from scipy.stats import pearsonr
 
+preds_dir = None
+
+
+def set_preds_dir(path):
+    global preds_dir
+    preds_dir = path
+
+
 # This function handles CTRL-L C interrupt, erasing unused folders and terminating the program
 def handle_signal(signum, stackframe):
     ''' signal handler '''
-    # code to wipe or delete your file
-    os.rmdir(preds_dir)
+    # Best-effort cleanup of the output folder if it is still empty.
+    if preds_dir and os.path.isdir(preds_dir):
+        try:
+            os.rmdir(preds_dir)
+        except OSError:
+            pass
     print('\n')
-    sys.exit()
+    sys.exit(1)
 
 
 # Code tested on script_sort_predictions_temp.ipynb

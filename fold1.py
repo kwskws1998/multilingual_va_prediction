@@ -1,5 +1,9 @@
 from transformers import RobertaForSequenceClassification, TrainingArguments, DataCollatorWithPadding, Trainer
-from models import DistilBertForSequenceClassificationSig, XLMRobertaForSequenceClassificationSig
+from models import (
+    DistilBertForSequenceClassificationSig,
+    GazeConcatForSequenceRegression,
+    XLMRobertaForSequenceClassificationSig,
+)
 from data_loader import MyDataset
 from custom_trainer import CustomTrainerMSE, CustomTrainerCCC, CustomTrainerRobust, CustomTrainerMSE_CCC, CustomTrainerRobustCCC
 from metrics import compute_metrics
@@ -11,25 +15,39 @@ from utils import create_prediction_tables
 
 
     
-def training_fold1(model, loss, timestamp, params, dataset, preds_dir, checkpoint):
+def training_fold1(model, loss, timestamp, params, dataset, preds_dir, checkpoint, gaze_config=None):
     output_dir1 = "Output Directory/" + timestamp + "/fold1"
     
     model_dir = "model/" + timestamp + "/fold1"
     log_dir = "runs/" + timestamp + "/fold1"
+    gaze_config = gaze_config or {}
+    use_gaze_concat = bool(gaze_config.get("use_gaze_concat", False))
     
-    # Chooses the model
+    train_data = dataset[0][0]
+    val_data = dataset[0][1]
+
+    # Chooses the model and batch size
     if(model == 'distilbert'):
-        checkpoint = checkpoint
-        model = DistilBertForSequenceClassificationSig.from_pretrained(checkpoint, num_labels=2)
         batch_size = params['batch_size_distil']
     elif(model == 'xlmroberta-base'):
-        checkpoint = checkpoint
-        model = XLMRobertaForSequenceClassificationSig.from_pretrained(checkpoint, num_labels=2)
         batch_size = params['batch_size_xlmrB']
     elif(model == 'xlmroberta-large'):
-        checkpoint = checkpoint
-        model = XLMRobertaForSequenceClassificationSig.from_pretrained(checkpoint, num_labels=2)
         batch_size = params['batch_size_xlmrL']
+
+    if use_gaze_concat:
+        model = GazeConcatForSequenceRegression(
+            checkpoint=checkpoint,
+            tokenizer=train_data.tokenizer,
+            et2_checkpoint_path=gaze_config.get("et2_checkpoint_path"),
+            features_used=gaze_config.get("features_used", [1, 1, 1, 1, 1]),
+            fp_dropout=tuple(gaze_config.get("fp_dropout", [0.0, 0.3])),
+        )
+    elif(model == 'distilbert'):
+        model = DistilBertForSequenceClassificationSig.from_pretrained(checkpoint, num_labels=2)
+    elif(model == 'xlmroberta-base'):
+        model = XLMRobertaForSequenceClassificationSig.from_pretrained(checkpoint, num_labels=2)
+    elif(model == 'xlmroberta-large'):
+        model = XLMRobertaForSequenceClassificationSig.from_pretrained(checkpoint, num_labels=2)
         
     training_args = TrainingArguments(
         output_dir=output_dir1,
@@ -40,6 +58,9 @@ def training_fold1(model, loss, timestamp, params, dataset, preds_dir, checkpoin
         num_train_epochs=params['train_epochs'],
         learning_rate=params['lr'], 
         weight_decay=params['weight_decay'],
+        optim=params.get('optim', 'adamw_torch'),
+        gradient_accumulation_steps=params.get('gradient_accumulation_steps', 1),
+        seed=params.get('seed', 42),
         group_by_length=True,
         evaluation_strategy="epoch", 
         save_strategy="epoch",
@@ -50,10 +71,6 @@ def training_fold1(model, loss, timestamp, params, dataset, preds_dir, checkpoin
         
     
     print("Starting fold 1")
-    
-    train_data = dataset[0][0]
-    val_data = dataset[0][1]
-    
     data_collator = DataCollatorWithPadding(train_data.tokenizer)
     
     if(loss == 'mse'):
@@ -133,4 +150,3 @@ def training_fold1(model, loss, timestamp, params, dataset, preds_dir, checkpoin
     
     trainer1.save_model(model_dir)  
     
-
