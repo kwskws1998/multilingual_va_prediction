@@ -1,37 +1,21 @@
-"""
-et2_wrapper.py
-==============
-eyetrackpy의 FixationsPredictor_2를 대체하는 래퍼.
-사용자가 학습한 RoBERTa 체크포인트(.pt / .safetensors)를 로드해서
-reward_model_base.py가 기대하는 인터페이스를 그대로 제공.
-
-환경변수 ET2_CHECKPOINT_PATH로 체크포인트 경로 지정.
-setup_et_models.py를 실행하면 자동으로 설정됨.
-"""
-
 import os
 import re
+
 import numpy as np
 import torch
 import transformers
 
-# safetensors 선택적 import
 try:
     from safetensors.torch import load_file as st_load_file
+
     HAS_SAFETENSORS = True
 except ImportError:
     HAS_SAFETENSORS = False
 
-FEATURE_NAMES = ["nFix", "FFD", "GPT", "TRT", "fixProp"]
 WINDOW_SIZE = 512
 OVERLAP = 50
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-# ──────────────────────────────────────────────
-# 내부 RoBERTa 회귀 모델 (노트북 model.py와 동일)
-# ──────────────────────────────────────────────
 
 class _RobertaRegressionModel(torch.nn.Module):
     def __init__(self, model_name="roberta-base"):
@@ -42,68 +26,35 @@ class _RobertaRegressionModel(torch.nn.Module):
 
     def forward(self, input_ids, attention_mask, predict_mask):
         hidden = self.roberta(input_ids, attention_mask=attention_mask).last_hidden_state
-        Y_pred = self.decoder(hidden)
-        mask = (predict_mask == 0).unsqueeze(-1).expand_as(Y_pred).to(Y_pred.device)
-        Y_pred = Y_pred.masked_fill(mask, -1.0)
-        return Y_pred
+        pred = self.decoder(hidden)
+        mask = (predict_mask == 0).unsqueeze(-1).expand_as(pred).to(pred.device)
+        pred = pred.masked_fill(mask, -1.0)
+        return pred
 
-
-# ──────────────────────────────────────────────
-# 공개 인터페이스: reward_model_base.py가 임포트하는 클래스
-# ──────────────────────────────────────────────
 
 class FixationsPredictor_2:
-    """
-    reward_model_base.py 호환 인터페이스.
-
-    reward_model_base.py의 호출 패턴:
-        fp = FixationsPredictor_2(modelTokenizer=rm_tokenizer, remap=False)
-        fixations, fix_attn, _, _, _, _ = fp._compute_mapped_fixations(input_ids, attention_mask)
-
-    fixations shape: (1, seq_len, 5)  — 5 ET features per RM token
-    """
-
-    def __init__(self, modelTokenizer, remap=False,
-                 checkpoint_path=None, roberta_model_name="roberta-base"):
+    def __init__(self, modelTokenizer, remap=False, checkpoint_path=None, roberta_model_name="roberta-base"):
         self.rm_tokenizer = modelTokenizer
-        self.roberta_model_name = roberta_model_name
-
-        # 체크포인트 경로 결정: 인자 > 환경변수 > 기본값
-        ckpt = (
-            checkpoint_path
-            or os.environ.get("ET2_CHECKPOINT_PATH", "./checkpoints/et_predictor2_seed123")
-        )
+        ckpt = checkpoint_path or os.environ.get("ET2_CHECKPOINT_PATH", "./checkpoints/et_predictor2_seed123")
         self.checkpoint_path = ckpt
-
-        # RoBERTa 토크나이저 (예측용 — RM 토크나이저와 다름)
         self.roberta_tokenizer = transformers.RobertaTokenizer.from_pretrained(
             roberta_model_name, add_prefix_space=True
         )
-
-        # 모델 로드
         self.model = _RobertaRegressionModel(roberta_model_name).to(device)
         self._load_checkpoint(ckpt)
         self.model.eval()
-
-        print(f"[et2_wrapper] FixationsPredictor_2 로드 완료: {ckpt}")
-
-    # ── 체크포인트 로드 ──────────────────────────
+        print(f"[et2_wrapper] FixationsPredictor_2 loaded: {ckpt}")
 
     def _load_checkpoint(self, path):
-        """확장자 없어도 .safetensors → .pt 순으로 탐색"""
-        # 확장자가 이미 붙어 있는 경우
         if os.path.isfile(path):
             return self._load_from_file(path)
-
-        # 확장자 없이 넘어온 경우
         for ext in [".safetensors", ".pt", ".bin"]:
             candidate = path + ext
             if os.path.isfile(candidate):
                 return self._load_from_file(candidate)
-
         raise FileNotFoundError(
-            f"[et2_wrapper] 체크포인트를 찾을 수 없습니다: {path}[.safetensors/.pt]\n"
-            "ET2_CHECKPOINT_PATH 환경변수를 확인하거나 setup_et_models.py를 다시 실행하세요."
+            f"[et2_wrapper] checkpoint not found: {path}[.safetensors/.pt]\n"
+            "Check ET2_CHECKPOINT_PATH or run setup_et_models.py."
         )
 
     def _load_from_file(self, path):
@@ -114,46 +65,25 @@ class FixationsPredictor_2:
         else:
             state = torch.load(path, map_location=device)
         self.model.load_state_dict(state, strict=True)
-        print(f"[et2_wrapper] 가중치 로드: {path}")
-
-    # ── reward_model_base.py 호환 메인 인터페이스 ──
+        print(f"[et2_wrapper] weights loaded: {path}")
 
     def _compute_mapped_fixations(self, input_ids_rm, attention_mask_rm=None):
-        """
-        input_ids_rm:      (1, seq_len) LongTensor  — RM tokenizer token ids
-        attention_mask_rm: (1, seq_len) LongTensor  — 1=real token, 0=pad
-
-        반환 (reward_model_base.py 6-tuple 규격):
-            fixations               (1, seq_len, 5)  float32
-            fixations_attention_mask (1, seq_len)    long
-            None, None, None, None
-        """
         if attention_mask_rm is None:
             attention_mask_rm = torch.ones_like(input_ids_rm)
 
-        ids  = input_ids_rm[0].cpu().tolist()
+        ids = input_ids_rm[0].cpu().tolist()
         mask = attention_mask_rm[0].cpu().tolist()
-
-        # 패딩 제거 후 RM 토크나이저로 텍스트 복원
         pad_id = self.rm_tokenizer.pad_token_id or 0
         ids_no_pad = [i for i, m in zip(ids, mask) if m == 1 and i != pad_id]
         text = self.rm_tokenizer.decode(ids_no_pad, skip_special_tokens=True)
 
-        # RoBERTa로 단어 수준 ET 특징 예측
         word_features, words = self._predict_words(text)
-
-        # RM 토큰 공간으로 리매핑
         remapped = self._remap_to_rm_tokens(word_features, words, ids, mask)
-
         fixations = remapped.unsqueeze(0).to(input_ids_rm.device)
-        fix_attn  = torch.tensor(mask, dtype=torch.long).unsqueeze(0).to(input_ids_rm.device)
-
+        fix_attn = torch.tensor(mask, dtype=torch.long).unsqueeze(0).to(input_ids_rm.device)
         return fixations, fix_attn, None, None, None, None
 
-    # ── 내부 예측 로직 ────────────────────────────
-
     def _predict_words(self, text):
-        """텍스트를 받아 단어 수준 5-feature 예측 반환"""
         words = self._segment_text(text)
         if not words:
             return np.zeros((0, 5), dtype=np.float32), words
@@ -165,12 +95,10 @@ class FixationsPredictor_2:
             truncation=False,
             padding=False,
         )
-        input_ids   = enc["input_ids"].to(device)
-        attn_mask   = enc["attention_mask"].to(device)
+        input_ids = enc["input_ids"].to(device)
+        attn_mask = enc["attention_mask"].to(device)
 
         token_preds = self._sliding_window_predict(input_ids, attn_mask)
-
-        # 각 단어의 첫 번째 서브워드(Ġ) 예측값을 단어 대표값으로 사용
         word_features = self._aggregate_to_words(token_preds, input_ids.squeeze(0))
         return word_features, words
 
@@ -178,47 +106,41 @@ class FixationsPredictor_2:
     def _is_cjk(ch):
         code = ord(ch)
         return (
-            0x4E00 <= code <= 0x9FFF    # CJK Unified Ideographs
-            or 0x3040 <= code <= 0x30FF # Hiragana + Katakana
-            or 0xAC00 <= code <= 0xD7AF # Hangul Syllables
+            0x4E00 <= code <= 0x9FFF
+            or 0x3040 <= code <= 0x30FF
+            or 0xAC00 <= code <= 0xD7AF
         )
 
     def _segment_text(self, text):
         text = (text or "").strip()
         if not text:
             return []
-
         if any(ch.isspace() for ch in text):
             words = text.split()
             if words:
                 return words
-
         if any(self._is_cjk(ch) for ch in text):
-            # CJK fallback: whitespace-only split collapses whole sentences into one token.
             return [ch for ch in text if not ch.isspace()]
-
         return re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)
 
     def _sliding_window_predict(self, input_ids, attn_mask):
-        """512 초과 시퀀스를 슬라이딩 윈도우로 처리 (overlap 50, linear blending)"""
         seq_len = input_ids.shape[1]
-
         if seq_len <= WINDOW_SIZE:
             predict_mask = attn_mask.clone()
             with torch.no_grad():
                 pred = self.model(input_ids, attn_mask, predict_mask)
             return pred.squeeze(0).cpu().numpy()
 
-        preds   = np.zeros((seq_len, 5), dtype=np.float32)
+        preds = np.zeros((seq_len, 5), dtype=np.float32)
         weights = np.zeros(seq_len, dtype=np.float32)
-        stride  = WINDOW_SIZE - OVERLAP
-        start   = 0
+        stride = WINDOW_SIZE - OVERLAP
+        start = 0
 
         while start < seq_len:
-            end      = min(start + WINDOW_SIZE, seq_len)
-            ids_win  = input_ids[:, start:end]
+            end = min(start + WINDOW_SIZE, seq_len)
+            ids_win = input_ids[:, start:end]
             mask_win = attn_mask[:, start:end]
-            win_len  = end - start
+            win_len = end - start
 
             linear_w = np.ones(win_len, dtype=np.float32)
             if start > 0:
@@ -245,33 +167,23 @@ class FixationsPredictor_2:
         return preds
 
     def _aggregate_to_words(self, token_preds, input_ids_1d):
-        """토큰 수준 예측 → 단어 수준 (첫 서브워드 값 사용)"""
-        tokens = [self.roberta_tokenizer.convert_ids_to_tokens(int(i))
-                  for i in input_ids_1d]
-
+        tokens = [self.roberta_tokenizer.convert_ids_to_tokens(int(i)) for i in input_ids_1d]
         word_feats = []
         seen_first_word = False
         for idx, tok in enumerate(tokens):
             if tok in ("<s>", "</s>", "<pad>"):
                 continue
-            # Ġ로 시작하면 새 단어의 첫 서브워드
             if tok.startswith("Ġ") or not seen_first_word:
                 pred = np.clip(token_preds[idx], 0, None)
                 word_feats.append(pred)
                 seen_first_word = True
-
-        return np.array(word_feats, dtype=np.float32) if word_feats else np.zeros((0, 5), dtype=np.float32)
-
-    # ── RM 토큰 공간으로 리매핑 ──────────────────
+        if word_feats:
+            return np.array(word_feats, dtype=np.float32)
+        return np.zeros((0, 5), dtype=np.float32)
 
     def _remap_to_rm_tokens(self, word_features, words, rm_ids, rm_mask):
-        """
-        단어 수준 ET 특징을 RM 토크나이저의 토큰 공간으로 매핑.
-        논문 Table 8 방식: 단어의 첫 번째 RM 토큰에만 값 할당, 나머지는 0.
-        """
         seq_len = len(rm_ids)
-        output  = torch.zeros(seq_len, 5, dtype=torch.float32)
-
+        output = torch.zeros(seq_len, 5, dtype=torch.float32)
         if len(word_features) == 0 or len(words) == 0:
             return output
 
@@ -288,37 +200,27 @@ class FixationsPredictor_2:
             first = indices[0]
             if first < seq_len and rm_mask[first] == 1:
                 output[first] = torch.tensor(word_features[w_idx], dtype=torch.float32)
-
         return output
 
 
 def _align_words_to_rm_tokens(words, rm_tokens, rm_tokenizer):
-    """
-    단어 리스트를 RM 토큰 인덱스 리스트로 매핑.
-    특수 토큰은 스킵. 각 단어에 속하는 토큰 인덱스 목록 반환.
-    """
     special_ids = set(rm_tokenizer.all_special_ids)
     word_to_indices = []
     tok_idx = 0
 
     for word in words:
-        indices        = []
+        indices = []
         chars_remaining = len(word)
-
         while tok_idx < len(rm_tokens) and chars_remaining > 0:
-            tok    = rm_tokens[tok_idx]
+            tok = rm_tokens[tok_idx]
             tok_id = rm_tokenizer.convert_tokens_to_ids(tok)
-
             if tok_id in special_ids:
                 tok_idx += 1
                 continue
 
-            # Llama/GPT 계열: Ġ, ▁, 공백 prefix 제거 후 실제 글자 수 계산
             tok_clean = tok.lstrip("Ġ▁ ")
             indices.append(tok_idx)
             chars_remaining -= len(tok_clean)
             tok_idx += 1
-
         word_to_indices.append(indices)
-
     return word_to_indices

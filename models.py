@@ -1,42 +1,19 @@
 from collections import OrderedDict
+from typing import Optional, Tuple, Union
 
-from transformers import AutoModel, DistilBertForSequenceClassification, XLMRobertaForSequenceClassification
-from transformers.models.roberta.modeling_roberta import RobertaForSequenceClassification
-from transformers.models.xlm_roberta.configuration_xlm_roberta import XLMRobertaConfig
 import torch
 import torch.nn as nn
-from typing import Dict, List, Optional, Set, Tuple, Union
-from transformers.modeling_outputs import (
-    BaseModelOutput,
-    MaskedLMOutput,
-    MultipleChoiceModelOutput,
-    QuestionAnsweringModelOutput,
-    SequenceClassifierOutput,
-    TokenClassifierOutput,
-    
-    
-)
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from transformers import AutoModel, DistilBertForSequenceClassification
+from transformers.modeling_outputs import SequenceClassifierOutput
+from transformers.models.roberta.modeling_roberta import RobertaForSequenceClassification
+from transformers.models.xlm_roberta.configuration_xlm_roberta import XLMRobertaConfig
 
 
 class DistilBertForSequenceClassificationSig(DistilBertForSequenceClassification):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # self.sigmoid = torch.sigmoid
-        # self.sigmoid = torch.nn.functional.hardsigmoid # HardSigmoid
+        self.sigmoid = lambda x: torch.nn.functional.hardsigmoid(3 * x)
 
-        # self.sigmoid = self.customSigmoid # CUSTOM SIGMOID
-        self.sigmoid = self.customHardSigmoid # CUSTOM HARD SIGMOID
-        self.threshold = torch.nn.Threshold(-1,-1) 
-
-        
-    def customSigmoid(self, x):
-        return torch.sigmoid(5*x)  
-    def customHardSigmoid(self, x):
-        return torch.nn.functional.hardsigmoid(3*x)
-  
-            
-        
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -48,30 +25,25 @@ class DistilBertForSequenceClassificationSig(DistilBertForSequenceClassification
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[SequenceClassifierOutput, Tuple[torch.Tensor, ...]]:
-        
-        # ret = super.forward(input_ids, attention_mask, head_mask, inputs_embeds, labels, output_attentions, output_hidden_states, return_dict)
-        ret = super(DistilBertForSequenceClassificationSig, self).forward(input_ids, attention_mask, head_mask, inputs_embeds, labels, output_attentions, output_hidden_states, return_dict)
-        ret.logits = self.sigmoid(ret.logits) # Uncomment to use any sigmoid
-        
-        # ret.logits = torch.relu(ret.logits) # Uncomment to use ReLu w threshold
-        # ret.logits = -self.threshold(-ret.logits) # Uncomment to use ReLu w threshold
-        
-
+        ret = super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        ret.logits = self.sigmoid(ret.logits)
         return ret
-        
-    
-        
+
+
 class RobertaForSequenceClassificationSig(RobertaForSequenceClassification):
     def __init__(self, config):
         super().__init__(config)
-        # self.sigmoid = torch.sigmoid
-        self.sigmoid = torch.nn.functional.hardsigmoid # HardSigmoid
-        self.threshold = torch.nn.Threshold(-1,-1)
+        self.sigmoid = lambda x: torch.nn.functional.hardsigmoid(3 * x)
 
-    def customHardSigmoid(self, x):
-        return torch.nn.functional.hardsigmoid(3*x)
-        
-        
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -85,38 +57,27 @@ class RobertaForSequenceClassificationSig(RobertaForSequenceClassification):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], SequenceClassifierOutput]:
-        
-        # ret = super.forward(input_ids, attention_mask, token_type_ids, position_ids, head_mask, inputs_embeds, labels, output_attentions, output_hidden_states, return_dict)
-        ret = super(RobertaForSequenceClassificationSig, self).forward(input_ids, attention_mask, token_type_ids, position_ids, head_mask, inputs_embeds, labels, output_attentions, output_hidden_states, return_dict)
-        ret.logits = self.sigmoid(ret.logits) # Uncomment to use any sigmoid
-        
-        # ret.logits = torch.relu(ret.logits) # Uncomment to use ReLu w threshold
-        # ret.logits = -self.threshold(-ret.logits) # Uncomment to use ReLu w threshold
-        
-
-        
+        ret = super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            labels=labels,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        ret.logits = self.sigmoid(ret.logits)
         return ret
-    
-        
-        
-class XLMRobertaForSequenceClassificationSig(RobertaForSequenceClassificationSig):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-    """
-    This class overrides [`RobertaForSequenceClassification`]. Please check the superclass for the appropriate
-    documentation alongside usage examples.
-    """
 
+
+class XLMRobertaForSequenceClassificationSig(RobertaForSequenceClassificationSig):
     config_class = XLMRobertaConfig
 
 
 class GazeConcatForSequenceRegression(nn.Module):
-    """
-    Seeing Eye to AI-style fusion:
-    [eye_start] + projected_fixations + [eye_end] + text_embeddings
-    """
-
     def __init__(
         self,
         checkpoint,
@@ -162,7 +123,6 @@ class GazeConcatForSequenceRegression(nn.Module):
 
         self.eye_start = nn.Parameter(torch.zeros(self.hidden_size))
         self.eye_end = nn.Parameter(torch.zeros(self.hidden_size))
-
         self.fixation_cache = OrderedDict()
         self.max_fix_cache_size = max_fix_cache_size
         self.fp_model = self._load_et2_predictor(et2_checkpoint_path)
@@ -172,8 +132,7 @@ class GazeConcatForSequenceRegression(nn.Module):
             from et2_wrapper import FixationsPredictor_2
         except ImportError as exc:
             raise ImportError(
-                "Could not import FixationsPredictor_2. Make sure et2_wrapper.py exists and "
-                "run setup_et_models.py if needed."
+                "Could not import FixationsPredictor_2. Make sure et2_wrapper.py exists and run setup_et_models.py if needed."
             ) from exc
 
         fp_model = FixationsPredictor_2(
@@ -281,16 +240,10 @@ class GazeConcatForSequenceRegression(nn.Module):
         fixations_projected = self.norm_layer_fix(fixations_projected)
 
         batch_size = input_ids.size(0)
-        eye_start_embed = (
-            self.eye_start.to(device=model_device, dtype=text_embeddings.dtype)
-            .view(1, 1, -1)
-            .expand(batch_size, -1, -1)
-        )
-        eye_end_embed = (
-            self.eye_end.to(device=model_device, dtype=text_embeddings.dtype)
-            .view(1, 1, -1)
-            .expand(batch_size, -1, -1)
-        )
+        eye_start_embed = self.eye_start.to(device=model_device, dtype=text_embeddings.dtype).view(1, 1, -1)
+        eye_end_embed = self.eye_end.to(device=model_device, dtype=text_embeddings.dtype).view(1, 1, -1)
+        eye_start_embed = eye_start_embed.expand(batch_size, -1, -1)
+        eye_end_embed = eye_end_embed.expand(batch_size, -1, -1)
         separator_mask = torch.ones((batch_size, 1), dtype=attention_mask.dtype, device=model_device)
 
         inputs_embeds = torch.cat(
@@ -316,7 +269,6 @@ class GazeConcatForSequenceRegression(nn.Module):
             encoder_kwargs["position_ids"] = position_ids
 
         encoder_outputs = self.encoder(**encoder_kwargs)
-
         cls_position = fixations_projected.shape[1] + 2
         pooled_output = encoder_outputs.last_hidden_state[:, cls_position, :]
         pooled_output = self.pre_classifier(pooled_output)
