@@ -351,6 +351,22 @@ python train_model.py xlmroberta-base mse+ccc \
 For a full experiment matrix guide (model/loss/features/batch/optimizer combinations),
 see `README_experiments.md`.
 
+### Out-of-fold overall metrics
+
+After both folds finish, `train_model.py` merges `predictions_fold1.csv` and
+`predictions_fold2.csv` and writes:
+
+- `all_predictions.csv`
+- `overall_metrics.csv`
+- `overall_metrics.json`
+- `dataset_metrics.csv`
+
+To recompute these files for an existing run:
+
+```bash
+python compute_overall_metrics.py Preds/<run-directory>
+```
+
 ### Standalone benchmark: EmoBank
 
 You can run a separate fixed-split benchmark (train/dev/test) on EmoBank:
