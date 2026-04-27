@@ -1,15 +1,15 @@
 import pandas as pd
 from transformers import DataCollatorWithPadding, TrainingArguments
 
-from custom_trainer import (
+from va_gaze.train.custom_trainer import (
     CustomTrainerCCC,
     CustomTrainerMSE,
     CustomTrainerMSE_CCC,
     CustomTrainerRobust,
     CustomTrainerRobustCCC,
 )
-from metrics import compute_metrics
-from models import (
+from va_gaze.eval.metrics import compute_metrics
+from va_gaze.models.regression import (
     DistilBertForSequenceClassificationSig,
     GazeConcatForSequenceRegression,
     XLMRobertaForSequenceClassificationSig,

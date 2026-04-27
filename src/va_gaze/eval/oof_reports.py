@@ -91,21 +91,21 @@ def _join_dataset_and_predictions(dataset_df, predictions_df, prediction_filenam
 
 
 # Code tested on script_sort_predictions_temp.ipynb
-def create_prediction_tables(path):
+def create_prediction_tables(path, data_dir="data"):
     df_preds_fold1 = pd.read_csv(path + '/predictions_fold1.csv')
     df_preds_fold2 = pd.read_csv(path + '/predictions_fold2.csv')
     df_preds_fold1 = df_preds_fold1.rename(columns={'Unnamed: 0' : 'index_pred', '0' : 'valence_pred', '1' : 'arousal_pred'})
     df_preds_fold2 = df_preds_fold2.rename(columns={'Unnamed: 0' : 'index_pred', '0' : 'valence_pred', '1' : 'arousal_pred'})
     
     # Import original dataset files to df
-    df_dataset_fold1 = pd.read_csv('data/full_dataset_fold1.csv',sep='\t',
+    df_dataset_fold1 = pd.read_csv(os.path.join(data_dir, 'full_dataset_fold1.csv'),sep='\t',
                     quotechar='"',
                     engine='python', 
                     quoting=csv.QUOTE_NONE,
                     escapechar='\\',
                     keep_default_na=False,
                     dtype={'index':np.int32,'text':str,'valence':np.float64, 'arousal':np.float64})
-    df_dataset_fold2 = pd.read_csv('data/full_dataset_fold2.csv',sep='\t',
+    df_dataset_fold2 = pd.read_csv(os.path.join(data_dir, 'full_dataset_fold2.csv'),sep='\t',
                     quotechar='"',
                     engine='python', 
                     quoting=csv.QUOTE_NONE,

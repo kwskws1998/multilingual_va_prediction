@@ -1,6 +1,12 @@
 # Quantifying Valence and Arousal in Text with Multilingual Pre-trained Transformers 
 Repository for Quantifying Valence and Arousal in Text with Multilingual Pre-trained Transformers 
 
+## Current repository scope
+
+- This repo is now focused on **VA prediction + gaze-concat training**.
+- RLHF/reward-model code paths were removed.
+- English data preparation uses a **single Google Drive zip** (downloaded with `gdown`).
+
 
 ## Dataset
 The dataset proposed in this paper was built collecting 34 different public datasets of annotated data for the emotional dimensions of Valence and Arousal.
@@ -249,6 +255,35 @@ https://drive.google.com/drive/folders/1BzdVmN51f33NHrdemJajz67MmlZljB2J?usp=sha
 
 ## Code
 
+### Repository structure
+
+Core code was reorganized under `src/va_gaze/`:
+
+```text
+src/va_gaze/
+  cli/
+    train_model.py
+    setup_et_models.py
+    compute_overall_metrics.py
+  data/
+    dataset.py
+    prepare_english_data.py
+  models/
+    regression.py
+    et2_wrapper.py
+  train/
+    custom_trainer.py
+    fold_runner.py
+    fold1.py
+    fold2.py
+  eval/
+    metrics.py
+    oof_reports.py
+```
+
+Root scripts (`train_model.py`, `setup_et_models.py`, `prepare_english_data.py`,
+`compute_overall_metrics.py`) are thin wrappers for the modules above.
+
 ### One-shot setup (new GPU/server)
 
 Run this once on a fresh machine:
@@ -285,8 +320,9 @@ python setup_et_models.py --skip-install --skip-et1 --et2-checkpoint ./checkpoin
 If `./checkpoints/et_predictor2_seed123(.pt/.safetensors)` is missing, the setup script
 automatically downloads `et_predictor2_seed123.safetensors` from:
 `skboy/et_prediction_2` on Hugging Face.
+(`checkpoints/` is created automatically if needed.)
 
-### Build English-only dataset (from README links)
+### Build English-only dataset (Google Drive zip via gdown)
 
 If you want to run quickly with English data only, use:
 
@@ -297,30 +333,30 @@ python3 prepare_english_data.py --output-dir data --seed 42
 The script is idempotent: if `full_dataset_fold1.csv`, `full_dataset_fold2.csv`, and
 `full_dataset_english_all.csv` already exist, it skips rebuilding unless `--force` is used.
 
+By default it downloads this zip from Google Drive (via `gdown`) and extracts TSV files:
+- `https://drive.google.com/file/d/1xXM32nva_4I3EAVAOrQ84L16f-LjsJbj/view?usp=sharing`
+
 This creates:
 - `data/full_dataset_fold1.csv`
 - `data/full_dataset_fold2.csv`
 - `data/full_dataset_english_all.csv`
+- `data/external_english/*.tsv` (extracted source files)
 
-Included public English sources:
-- `Emobank`
-- `fb` (Facebook posts)
-- `nrc-vad`
-- `GlasgowNorms`
-- `word ratings ENG` (Warriner et al.)
-
-Note: `ANET` and `IEMOCAP` require separate access authorization, so they are not auto-downloaded.
-
-If you have authorized TSV files (e.g., `iemocap.tsv`, `emotales.tsv`, `scott_et_al.tsv`),
-put them in `external_english/` and run:
+If you already have local TSV files and do not want to download again:
 
 ```bash
-python3 prepare_english_data.py --output-dir data --seed 42 --force
+python3 prepare_english_data.py --output-dir data --seed 42 --force --skip-gdrive-download
 ```
 
-The builder auto-loads every `*.tsv` in `external_english/` when columns
+The builder auto-loads every `*.tsv` in `data/external_english/` when columns
 `text`, `valence`, and `arousal` are present.
-(`external_english/` is auto-created if missing.)
+(`data/external_english/` is auto-created if missing.)
+
+If you prefer another dataset folder:
+
+```bash
+python3 prepare_english_data.py --output-dir /path/to/my_data --seed 42 --force
+```
 
 To fine-tune the model please run the file `train_model.py`.
 It expects two arguments:
@@ -348,8 +384,45 @@ python train_model.py xlmroberta-base mse+ccc \
   - `--save-total-limit` (default `1`) keeps only recent checkpoints to reduce disk usage.
   - `--save-strategy no` disables periodic checkpoint saving (useful on low-storage GPUs).
 
-For a full experiment matrix guide (model/loss/features/batch/optimizer combinations),
-see `README_experiments.md`.
+### Experiment matrix (single README version)
+
+Default VA hyperparameters (unchanged):
+- batch size: `16`
+- learning rate: `6e-6`
+- train epochs: `10`
+- weight decay: `0.01`
+- warmup ratio: `0.1`
+- optimizer: `adamw_torch`
+- gradient accumulation: `1`
+- seed: `42`
+- maxlen: `200`
+
+Full CLI:
+
+```bash
+python train_model.py <model> <loss> \
+  [--use-gaze-concat] \
+  [--et2-checkpoint <path>] \
+  [--features-used <f1,f2,f3,f4,f5>] \
+  [--fp-dropout <p1,p2>] \
+  [--batch-size <int>] \
+  [--learning-rate <float>] \
+  [--train-epochs <int>] \
+  [--weight-decay <float>] \
+  [--warmup-ratio <float>] \
+  [--optim <name>] \
+  [--gradient-accumulation-steps <int>] \
+  [--seed <int>] \
+  [--maxlen <int>] \
+  [--data-dir <path>]
+```
+
+Feature flag order is always: `nFix,FFD,GPT,TRT,fixProp`.
+Examples:
+- all features: `1,1,1,1,1`
+- fcomb2.2 (FFD+TRT): `0,1,0,1,0`
+- TRT only: `0,0,0,1,0`
+- FFD only: `0,1,0,0,0`
 
 ### Out-of-fold overall metrics
 
@@ -365,15 +438,10 @@ To recompute these files for an existing run:
 
 ```bash
 python compute_overall_metrics.py Preds/<run-directory>
+# optional: --data-dir /path/to/data
 ```
 
-### Standalone benchmark: EmoBank
+## License
 
-You can run a separate fixed-split benchmark (train/dev/test) on EmoBank:
-
-```bash
-python benchmark_emobank.py xlmroberta-large mse --use-gaze-concat --et2-checkpoint ./checkpoints/et_predictor2_seed123
-```
-
-This script downloads EmoBank automatically (if needed), prepares split files under `data/emobank/`,
-trains on `train`, validates on `dev`, and reports final metrics on `test`.
+This repository is released under the MIT License.
+See `LICENSE`.

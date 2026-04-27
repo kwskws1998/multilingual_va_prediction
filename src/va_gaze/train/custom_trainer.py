@@ -3,7 +3,7 @@ import robust_loss_pytorch
 import torch
 from transformers import Trainer
 
-from utils import pearsonr
+from va_gaze.eval.oof_reports import pearsonr
 
 
 def _pop_labels(inputs):

@@ -129,7 +129,7 @@ class GazeConcatForSequenceRegression(nn.Module):
 
     def _load_et2_predictor(self, et2_checkpoint_path):
         try:
-            from et2_wrapper import FixationsPredictor_2
+            from va_gaze.models.et2_wrapper import FixationsPredictor_2
         except ImportError as exc:
             raise ImportError(
                 "Could not import FixationsPredictor_2. Make sure et2_wrapper.py exists and run setup_et_models.py if needed."

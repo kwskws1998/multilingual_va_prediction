@@ -13,6 +13,8 @@
 #   ET2_CHECKPOINT=... # ET2 checkpoint base path (default: ./checkpoints/et_predictor2_seed123)
 #   DATA_DIR=...       # output folder for fold csv files (default: ./data)
 #   DATA_SEED=...      # split seed for fold1/fold2 (default: 42)
+#   DATA_ZIP_URL=...   # Google Drive zip URL for English TSV bundle
+#   DATA_ZIP_NAME=...  # local filename for downloaded zip (default: english_va_bundle.zip)
 
 set -euo pipefail
 
@@ -34,6 +36,8 @@ FORCE_DATA="${FORCE_DATA:-0}"
 ET2_CHECKPOINT="${ET2_CHECKPOINT:-./checkpoints/et_predictor2_seed123}"
 DATA_DIR="${DATA_DIR:-./data}"
 DATA_SEED="${DATA_SEED:-42}"
+DATA_ZIP_URL="${DATA_ZIP_URL:-https://drive.google.com/file/d/1xXM32nva_4I3EAVAOrQ84L16f-LjsJbj/view?usp=sharing}"
+DATA_ZIP_NAME="${DATA_ZIP_NAME:-english_va_bundle.zip}"
 
 echo "============================================================"
 echo " VA+Gaze one-shot install"
@@ -61,6 +65,7 @@ fi
 echo
 echo "[3/3] English dataset build"
 DATA_ARGS=(--output-dir "$DATA_DIR" --seed "$DATA_SEED")
+DATA_ARGS+=(--gdrive-zip-url "$DATA_ZIP_URL" --gdrive-zip-name "$DATA_ZIP_NAME")
 if [[ "$FORCE_DATA" == "1" ]]; then
   DATA_ARGS+=(--force)
 fi

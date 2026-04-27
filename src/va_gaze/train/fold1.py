@@ -1,4 +1,4 @@
-from fold_runner import run_fold
+from va_gaze.train.fold_runner import run_fold
 
 
 def training_fold1(model, loss, timestamp, params, dataset, preds_dir, checkpoint, gaze_config=None):
